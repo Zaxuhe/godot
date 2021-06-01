@@ -5,8 +5,8 @@
 /*                           GODOT ENGINE                                */
 /*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2017 Godot Engine contributors (cf. AUTHORS.md)    */
+/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -27,63 +27,88 @@
 /* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
 /*************************************************************************/
+
 #ifndef GIPROBE_H
 #define GIPROBE_H
 
-#include "multimesh_instance.h"
-#include "scene/3d/visual_instance.h"
+#include "multimesh_instance_3d.h"
+#include "scene/3d/visual_instance_3d.h"
 
 class GIProbeData : public Resource {
-
 	GDCLASS(GIProbeData, Resource);
 
 	RID probe;
 
+	void _set_data(const Dictionary &p_data);
+	Dictionary _get_data() const;
+
+	Transform to_cell_xform;
+	AABB bounds;
+	Vector3 octree_size;
+
+	float dynamic_range = 4.0;
+	float energy = 1.0;
+	float bias = 1.5;
+	float normal_bias = 0.0;
+	float propagation = 0.7;
+	float anisotropy_strength = 0.5;
+	float ao = 0.0;
+	float ao_size = 0.5;
+	bool interior = false;
+	bool use_two_bounces = false;
+
 protected:
 	static void _bind_methods();
+	void _validate_property(PropertyInfo &property) const override;
 
 public:
-	void set_bounds(const AABB &p_bounds);
+	void allocate(const Transform &p_to_cell_xform, const AABB &p_aabb, const Vector3 &p_octree_size, const Vector<uint8_t> &p_octree_cells, const Vector<uint8_t> &p_data_cells, const Vector<uint8_t> &p_distance_field, const Vector<int> &p_level_counts);
 	AABB get_bounds() const;
-
-	void set_cell_size(float p_size);
-	float get_cell_size() const;
-
-	void set_to_cell_xform(const Transform &p_xform);
+	Vector3 get_octree_size() const;
+	Vector<uint8_t> get_octree_cells() const;
+	Vector<uint8_t> get_data_cells() const;
+	Vector<uint8_t> get_distance_field() const;
+	Vector<int> get_level_counts() const;
 	Transform get_to_cell_xform() const;
 
-	void set_dynamic_data(const PoolVector<int> &p_data);
-	PoolVector<int> get_dynamic_data() const;
+	void set_dynamic_range(float p_range);
+	float get_dynamic_range() const;
 
-	void set_dynamic_range(int p_range);
-	int get_dynamic_range() const;
-
-	void set_propagation(float p_range);
+	void set_propagation(float p_propagation);
 	float get_propagation() const;
 
-	void set_energy(float p_range);
+	void set_anisotropy_strength(float p_anisotropy_strength);
+	float get_anisotropy_strength() const;
+
+	void set_ao(float p_ao);
+	float get_ao() const;
+
+	void set_ao_size(float p_ao_size);
+	float get_ao_size() const;
+
+	void set_energy(float p_energy);
 	float get_energy() const;
 
-	void set_bias(float p_range);
+	void set_bias(float p_bias);
 	float get_bias() const;
 
-	void set_normal_bias(float p_range);
+	void set_normal_bias(float p_normal_bias);
 	float get_normal_bias() const;
 
 	void set_interior(bool p_enable);
 	bool is_interior() const;
 
-	void set_compress(bool p_enable);
-	bool is_compressed() const;
+	void set_use_two_bounces(bool p_enable);
+	bool is_using_two_bounces() const;
 
-	virtual RID get_rid() const;
+	virtual RID get_rid() const override;
 
 	GIProbeData();
 	~GIProbeData();
 };
 
-class GIProbe : public VisualInstance {
-	GDCLASS(GIProbe, VisualInstance);
+class GIProbe : public VisualInstance3D {
+	GDCLASS(GIProbe, VisualInstance3D);
 
 public:
 	enum Subdiv {
@@ -100,94 +125,21 @@ public:
 	typedef void (*BakeEndFunc)();
 
 private:
-	//stuff used for bake
-	struct Baker {
-
-		enum {
-			CHILD_EMPTY = 0xFFFFFFFF
-		};
-		struct Cell {
-
-			uint32_t childs[8];
-			float albedo[3]; //albedo in RGB24
-			float emission[3]; //accumulated light in 16:16 fixed point (needs to be integer for moving lights fast)
-			float normal[3];
-			uint32_t used_sides;
-			float alpha; //used for upsampling
-			int level;
-
-			Cell() {
-				for (int i = 0; i < 8; i++) {
-					childs[i] = CHILD_EMPTY;
-				}
-
-				for (int i = 0; i < 3; i++) {
-					emission[i] = 0;
-					albedo[i] = 0;
-					normal[i] = 0;
-				}
-				alpha = 0;
-				used_sides = 0;
-				level = 0;
-			}
-		};
-
-		Vector<Cell> bake_cells;
-		int cell_subdiv;
-
-		struct MaterialCache {
-			//128x128 textures
-			Vector<Color> albedo;
-			Vector<Color> emission;
-		};
-
-		Vector<Color> _get_bake_texture(Ref<Image> p_image, const Color &p_color);
-		Map<Ref<Material>, MaterialCache> material_cache;
-		MaterialCache _get_material_cache(Ref<Material> p_material);
-		int leaf_voxel_count;
-
-		AABB po2_bounds;
-		int axis_cell_size[3];
-
-		struct PlotMesh {
-			Ref<Material> override_material;
-			Vector<Ref<Material> > instance_materials;
-			Ref<Mesh> mesh;
-			Transform local_xform;
-		};
-
-		Transform to_cell_space;
-
-		List<PlotMesh> mesh_list;
-	};
-
 	Ref<GIProbeData> probe_data;
 
 	RID gi_probe;
 
-	Subdiv subdiv;
-	Vector3 extents;
-	int dynamic_range;
-	float energy;
-	float bias;
-	float normal_bias;
-	float propagation;
-	bool interior;
-	bool compress;
+	Subdiv subdiv = SUBDIV_128;
+	Vector3 extents = Vector3(10, 10, 10);
 
-	int color_scan_cell_width;
-	int bake_texture_size;
+	struct PlotMesh {
+		Ref<Material> override_material;
+		Vector<Ref<Material>> instance_materials;
+		Ref<Mesh> mesh;
+		Transform local_xform;
+	};
 
-	Vector<Color> _get_bake_texture(Ref<Image> p_image, const Color &p_color_mul, const Color &p_color_add);
-	Baker::MaterialCache _get_material_cache(Ref<Material> p_material, Baker *p_baker);
-	void _plot_face(int p_idx, int p_level, int p_x, int p_y, int p_z, const Vector3 *p_vtx, const Vector2 *p_uv, const Baker::MaterialCache &p_material, const AABB &p_aabb, Baker *p_baker);
-	void _plot_mesh(const Transform &p_xform, Ref<Mesh> &p_mesh, Baker *p_baker, const Vector<Ref<Material> > &p_materials, const Ref<Material> &p_override_material);
-	void _find_meshes(Node *p_at_node, Baker *p_baker);
-	void _fixup_plot(int p_idx, int p_level, int p_x, int p_y, int p_z, Baker *p_baker);
-
-	void _debug_mesh(int p_idx, int p_level, const AABB &p_aabb, Ref<MultiMesh> &p_multimesh, int &idx, Baker *p_baker);
-	void _create_debug_mesh(Baker *p_baker);
-
+	void _find_meshes(Node *p_at_node, List<PlotMesh> &plot_meshes);
 	void _debug_bake();
 
 protected:
@@ -206,32 +158,14 @@ public:
 
 	void set_extents(const Vector3 &p_extents);
 	Vector3 get_extents() const;
+	Vector3i get_estimated_cell_size() const;
 
-	void set_dynamic_range(int p_dynamic_range);
-	int get_dynamic_range() const;
+	void bake(Node *p_from_node = nullptr, bool p_create_visual_debug = false);
 
-	void set_energy(float p_energy);
-	float get_energy() const;
+	virtual AABB get_aabb() const override;
+	virtual Vector<Face3> get_faces(uint32_t p_usage_flags) const override;
 
-	void set_bias(float p_bias);
-	float get_bias() const;
-
-	void set_normal_bias(float p_normal_bias);
-	float get_normal_bias() const;
-
-	void set_propagation(float p_propagation);
-	float get_propagation() const;
-
-	void set_interior(bool p_enable);
-	bool is_interior() const;
-
-	void set_compress(bool p_enable);
-	bool is_compressed() const;
-
-	void bake(Node *p_from_node = NULL, bool p_create_visual_debug = false);
-
-	virtual AABB get_aabb() const;
-	virtual PoolVector<Face3> get_faces(uint32_t p_usage_flags) const;
+	TypedArray<String> get_configuration_warnings() const override;
 
 	GIProbe();
 	~GIProbe();
